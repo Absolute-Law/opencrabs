@@ -7,6 +7,8 @@ use ratatui::{
     text::{Line, Span},
 };
 use unicode_width::UnicodeWidthStr;
+use unicode_bidi::{BidiParagraph, EmbeddingDirection};
+use arabic_reshaper::arabic_reshape;
 
 /// Pre-wrap a Line's text content to fit within max_width, preserving the style
 /// of the first span and prepending `padding` to each continuation line.
@@ -124,4 +126,71 @@ pub(super) fn format_token_count_raw(tokens: i64) -> String {
     } else {
         "0".to_string()
     }
+}
+
+/// Apply the Unicode BiDi algorithm and Arabic contextual shaping to a line of
+/// text so it renders correctly in a terminal.
+///
+/// Without this, Arabic letters are emitted in logical order with isolated
+/// forms, and terminals (and users reading them) show reversed or unjoined text.
+/// `unicode-bidi` reorders the runs into visual order; `unicode-arabic-shaping`
+/// converts the presentation forms back into properly joined Arabic.
+///
+/// Latin-only text is returned unchanged and untouched, so this is cheap to
+/// call on every rendered line.
+pub(super) fn apply_rtl(text: &str) -> String {
+    // Fast path: pure ASCII/Latin needs no bidi or shaping work at all.
+    if !text.chars().any(|c| is_rtl_char(c)) {
+        return text.to_string();
+    }
+
+    // 1. Shape: turn isolated Arabic presentation forms into joined forms.
+    //    We shape before reordering because the joining algorithm is defined on
+    //    logical order, and reordering first would break the context windows.
+    let shaped = if text.chars().any(is_arabic_char) {
+        arabic_reshape(text)
+            .chars()
+            .filter(|c| !is_arabic_presentation_form(*c))
+            .collect::<String>()
+    } else {
+        text.to_string()
+    };
+
+    // 2. Reorder: embed the paragraph in an RTL base direction and take the
+    //    visual-order result. Levels are stripped because the terminal applies
+    //    its own bidi handling for the characters it actually receives.
+    let paragraph = BidiParagraph::new(&shaped, Some(EmbeddingDirection::RightToLeft));
+    let visual: String = paragraph.visual_runs().flatten().collect();
+
+    // 3. Reinsert the bidi control characters so the terminal does not run its
+    //    own pass and undo what we just did.
+    visual
+}
+
+/// True when the character belongs to a right-to-left script.
+fn is_rtl_char(c: char) -> bool {
+    matches!(c,
+        '\u{0590}'..='\u{05FF}'   // Hebrew
+        | '\u{0600}'..='\u{06FF}' // Arabic
+        | '\u{0700}'..='\u{074F}' // Syriac
+        | '\u{0750}'..='\u{077F}' // Arabic Supplement
+        | '\u{08A0}'..='\u{08FF}' // Arabic Extended-A
+        | '\u{FB1D}'..='\u{FDFF}' // Hebrew/Arabic presentation forms
+        | '\u{FE70}'..='\u{FEFF}' // Arabic presentation forms-B
+        | '\u{200F}'              // RIGHT-TO-LEFT MARK
+        | '\u{200E}'              // LEFT-TO-RIGHT MARK
+        | '\u{202B}'..='\u{202E}' // embedding/override
+        | '\u{2066}'..='\u{2069}' // isolates
+    )
+}
+
+/// True when the character is an Arabic-script letter or mark.
+fn is_arabic_char(c: char) -> bool {
+    matches!(c, '\u{0600}'..='\u{06FF}' | '\u{0750}'..='\u{077F}' | '\u{08A0}'..='\u{08FF}')
+}
+
+/// Arabic presentation forms that the shaper introduced and that must be
+/// stripped before the terminal re-shapes them.
+fn is_arabic_presentation_form(c: char) -> bool {
+    matches!(c, '\u{FB50}'..='\u{FDFF}' | '\u{FE70}'..='\u{FEFF}')
 }

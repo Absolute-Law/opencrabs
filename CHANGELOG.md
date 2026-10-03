@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **TUI rendered Arabic and other RTL scripts in reverse order.** The render path measured text with `unicode-width` but never applied the Unicode Bidirectional Algorithm or Arabic contextual shaping, so letters were emitted in logical order with isolated presentation forms. Entering Arabic text displayed it mirrored and unjoined, and mixed Arabic/Latin lines came out visually reversed. (`src/tui/render/utils.rs`, `src/tui/render/chat.rs`)
+
+### Added
+
+- `apply_rtl()` helper in `src/tui/render/utils.rs`. It shapes Arabic letters first, then reorders runs into visual order under an RTL base direction. Ordering matters: shaping must run on logical order because the joining algorithm depends on adjacent context.
+- A fast path that returns Latin-only text untouched, so the extra work costs nothing on the common case.
+- `unicode-bidi = "0.3"` dependency.
+
+### Dependencies
+
+- Added `unicode-bidi = "0.3"`.
+- Added `arabic_reshaper = "0.4"`. There is no `unicode-arabic-shaping` crate under that name on crates.io; `arabic_reshaper` is the working option.
+
+### Notes
+
+- Arabic support was previously absent at every layer: no BiDi dependency, no shaping, and no RTL handling anywhere in `src/`. Local-only models without Arabic capability compound the problem, since they may not emit coherent Arabic in the first place.
+
+
 ## [0.5.4] - 2026-09-26
 
 104 commits since v0.5.3, 7 contributors. 225 files changed, +18,619 / -1,429 lines.
