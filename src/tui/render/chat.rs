@@ -7,6 +7,7 @@ use super::super::markdown::parse_markdown;
 use super::theme::{self, Role};
 use super::tools::{render_approve_menu, render_inline_approval, render_tool_group};
 use super::utils::wrap_line_with_padding;
+use super::utils::apply_rtl;
 use ratatui::{
     Frame,
     layout::Rect,
